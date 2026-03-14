@@ -26,6 +26,7 @@ KOREAN_TRANSLATIONS: dict[str, str] = {
     "school_auth_sync": "\ud559\uad50\uc778\uc99d\ub3d9\uae30\ud654",
     "school_auth_status": "\ud559\uad50\uc778\uc99d\uc0c1\ud0dc",
     "student": "\ud559\uc0dd",
+    "student_setup": "\ud559\uc0dd\uc124\uc815",
     "role_add": "\uc5ed\ud560\ucd94\uac00",
     "nickname": "\ubcc4\uba85\ubcc0\uacbd",
     "schedule": "\uc77c\uc815",
@@ -81,6 +82,11 @@ ENGLISH_TRANSLATIONS: dict[str, str] = {
     "\ud559\uad50 Google \uacc4\uc815 \uc778\uc99d \uc7a0\uae08 \ucc44\ub110\uacfc \uc5ed\ud560\uc744 \uc124\uc815": "Configure the locked school verification channel and roles",
     "\ud559\uad50 \uc778\uc99d \ucc44\ub110 \uc7a0\uae08\uacfc \ubbf8\uc778\uc99d \uc5ed\ud560 \uc0c1\ud0dc\ub97c \ub2e4\uc2dc \ub3d9\uae30\ud654": "Resync school verification channel locks and unverified role state",
     "\ud604\uc7ac \ud559\uad50 \uc778\uc99d \uc644\ub8cc \uc5ec\ubd80\ub97c \ud655\uc778": "Check whether school verification is complete",
+    "\uc778\uc99d\ub41c \ud559\uad50 \uba54\uc77c \uc55e\uc790\ub9ac \uae30\uc900 \ud559\ub144 \uc5ed\ud560 \uc790\ub3d9 \uc124\uc815": "Configure automatic grade roles based on the first digit of verified school email addresses",
+    "3\ud559\ub144\uc73c\ub85c \ubcfc \ud559\uad50 \uba54\uc77c \uc55e\uc790\ub9ac \uc22b\uc790": "First digit of a verified school email that should count as 3rd grade",
+    "2\ud559\ub144\uc73c\ub85c \ubcfc \ud559\uad50 \uba54\uc77c \uc55e\uc790\ub9ac \uc22b\uc790": "First digit of a verified school email that should count as 2nd grade",
+    "1\ud559\ub144\uc73c\ub85c \ubcfc \ud559\uad50 \uba54\uc77c \uc55e\uc790\ub9ac \uc22b\uc790": "First digit of a verified school email that should count as 1st grade",
+    "\ud559\uc0dd \uc790\ub3d9 \uc5ed\ud560 \ubd80\uc5ec\uc5d0\uc11c \uc81c\uc678\ud560 \uad00\ub9ac\uc790 \uc5ed\ud560": "Admin role to exclude from automatic student role assignment",
     "\ud5c8\uc6a9\ud560 \ud559\uad50 \uba54\uc77c \ub3c4\uba54\uc778 \uc608: bssm.hs.kr": "Allowed school email domain, e.g. bssm.hs.kr",
     "\ud559\uad50 \uc778\uc99d\uc744 \uac74\ub108\ub6f8 \uad00\ub9ac\uc790/\uc6b4\uc601\uc9c4 \uc5ed\ud560": "Admin or staff role that bypasses school verification",
     "\uc774\ub984 \uc55e \uc22b\uc790 \uae30\uc900\uc73c\ub85c \ud559\ub144 \uc5ed\ud560 \uc77c\uad04 \ubd80\uc5ec": "Bulk-assign grade roles based on the leading digit in display names",
@@ -152,6 +158,7 @@ HELP_MESSAGES: dict[str, str] = {
         "/\ud559\uad50\uc778\uc99d\uc124\uc815 - \ud559\uad50 \uc778\uc99d \uc804\uc6a9 \ucc44\ub110/\uc5ed\ud560 \uc124\uc815 \ubc0f \uc11c\ubc84 \uc7a0\uae08\n"
         "/\ud559\uad50\uc778\uc99d\ub3d9\uae30\ud654 - \ud559\uad50 \uc778\uc99d \uc0c1\ud0dc\uc640 \ucc44\ub110 \uc7a0\uae08 \ub2e4\uc2dc \uc801\uc6a9\n"
         "/\ud559\uad50\uc778\uc99d\uc0c1\ud0dc - \ub0b4 \ud559\uad50 \uc778\uc99d \uc644\ub8cc \uc5ec\ubd80 \ud655\uc778\n"
+        "/\ud559\uc0dd\uc124\uc815 - \uc778\uc99d\ub41c \ud559\uad50 \uba54\uc77c \uc55e\uc790\ub9ac \uae30\uc900\uc73c\ub85c \ud559\ub144 \uc5ed\ud560 \uc790\ub3d9 \uc124\uc815 \ubc0f \ub3d9\uae30\ud654\n"
         "/\ud559\uc0dd - \uc774\ub984 \uc55e \uc22b\uc790 \uae30\uc900\uc73c\ub85c 1/2/3\ud559\ub144 \uc5ed\ud560 \uc77c\uad04 \ubd80\uc5ec\n"
         "/\uc5ed\ud560\ucd94\uac00 - \uad00\ub9ac\uc790 \uc804\uc6a9 \uc5ed\ud560 \uc0dd\uc131 \ubc0f \ubd80\uc5ec\n"
         "/\ubcc4\uba85\ubcc0\uacbd - \uad00\ub9ac\uc790 \uc804\uc6a9 \ubcc4\uba85 \ubcc0\uacbd\n"
@@ -184,6 +191,7 @@ HELP_MESSAGES: dict[str, str] = {
         "/school_auth_setup - Configure the school verification channel, roles, and server lock\n"
         "/school_auth_sync - Resync school verification channel locks and unverified role state\n"
         "/school_auth_status - Check whether your school verification is complete\n"
+        "/student_setup - Configure and sync automatic grade roles from verified school email prefixes\n"
         "/student - Bulk-assign 1st/2nd/3rd grade roles from leading digits in names\n"
         "/role_add - Admin-only role creation and assignment\n"
         "/nickname - Admin-only nickname change\n"

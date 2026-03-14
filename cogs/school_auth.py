@@ -17,7 +17,8 @@ from discord.ext import commands
 from google.auth.transport.requests import Request
 from google.oauth2 import id_token as google_id_token
 
-from services.school_auth_store import SchoolAuthGuildConfig
+from cogs.roles import ensure_student_grade_role
+from services.school_auth_store import SchoolAuthGuildConfig, StudentRoleConfig
 
 if TYPE_CHECKING:
     from bot import CoraxBot
@@ -27,14 +28,17 @@ AUTH_CATEGORY_NAME = "학교 인증"
 AUTH_CHANNEL_NAME = "학교-인증"
 UNVERIFIED_ROLE_NAME = "학교미인증"
 VERIFIED_ROLE_NAME = "학교인증완료"
+THIRD_GRADE_ROLE_NAME = "3학년"
+SECOND_GRADE_ROLE_NAME = "2학년"
+FIRST_GRADE_ROLE_NAME = "1학년"
 GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
-STATE_TTL_SECONDS = 600
+STATE_TTL_SECONDS = 3600
 
 
 class SchoolAuthLinkView(discord.ui.View):
     def __init__(self, auth_url: str):
-        super().__init__(timeout=300)
+        super().__init__(timeout=None)
         self.add_item(
             discord.ui.Button(
                 label="Google 계정으로 인증하기",
@@ -148,6 +152,258 @@ class SchoolAuthCog(commands.Cog):
             return None
 
         return guild.get_role(config.bypass_role_id)
+
+    def get_student_admin_role(
+        self,
+        guild: discord.Guild,
+        config: SchoolAuthGuildConfig,
+    ) -> discord.Role | None:
+        student_role_config = config.student_role_config
+        if student_role_config is None or student_role_config.admin_role_id is None:
+            return None
+
+        return guild.get_role(student_role_config.admin_role_id)
+
+    def member_is_student_role_bypass(
+        self,
+        member: discord.Member,
+        config: SchoolAuthGuildConfig,
+    ) -> bool:
+        if member.guild_permissions.administrator:
+            return True
+
+        admin_role = self.get_student_admin_role(member.guild, config)
+        return admin_role is not None and admin_role in member.roles
+
+    def get_student_grade_roles(
+        self,
+        guild: discord.Guild,
+        config: SchoolAuthGuildConfig,
+    ) -> dict[str, discord.Role] | None:
+        student_role_config = config.student_role_config
+        if student_role_config is None:
+            return None
+
+        third_grade_role = guild.get_role(student_role_config.third_grade_role_id)
+        second_grade_role = guild.get_role(student_role_config.second_grade_role_id)
+        first_grade_role = guild.get_role(student_role_config.first_grade_role_id)
+        if (
+            third_grade_role is None
+            or second_grade_role is None
+            or first_grade_role is None
+        ):
+            return None
+
+        return {
+            "3학년": third_grade_role,
+            "2학년": second_grade_role,
+            "1학년": first_grade_role,
+        }
+
+    def get_email_prefix_digit(self, email: str) -> str | None:
+        local_part, _, _ = email.partition("@")
+        local_part = local_part.strip()
+        if not local_part or not local_part[0].isdigit():
+            return None
+
+        return local_part[0]
+
+    async def sync_student_roles_for_member(
+        self,
+        member: discord.Member,
+        config: SchoolAuthGuildConfig,
+        *,
+        verified_email: str | None,
+        reason: str,
+    ) -> str | None:
+        if member.bot or self.member_is_student_role_bypass(member, config):
+            return None
+
+        student_role_config = config.student_role_config
+        grade_roles = self.get_student_grade_roles(member.guild, config)
+        if student_role_config is None or grade_roles is None:
+            return None
+
+        managed_roles = tuple(grade_roles.values())
+        prefix_map = {
+            str(student_role_config.third_grade_prefix): grade_roles["3학년"],
+            str(student_role_config.second_grade_prefix): grade_roles["2학년"],
+            str(student_role_config.first_grade_prefix): grade_roles["1학년"],
+        }
+
+        prefix_digit = self.get_email_prefix_digit(verified_email or "")
+        target_role = prefix_map.get(prefix_digit or "")
+        roles_to_remove = [
+            role for role in managed_roles if role != target_role and role in member.roles
+        ]
+        roles_to_add = []
+        if target_role is not None and target_role not in member.roles:
+            roles_to_add.append(target_role)
+
+        if not roles_to_add and not roles_to_remove:
+            return target_role.name if target_role is not None else None
+
+        if roles_to_remove:
+            await member.remove_roles(*roles_to_remove, reason=reason)
+        if roles_to_add:
+            await member.add_roles(*roles_to_add, reason=reason)
+
+        return target_role.name if target_role is not None else None
+
+    async def sync_student_roles(
+        self,
+        guild: discord.Guild,
+        config: SchoolAuthGuildConfig,
+        *,
+        requester: discord.Member,
+        source_label: str,
+    ) -> str:
+        student_role_config = config.student_role_config
+        grade_roles = self.get_student_grade_roles(guild, config)
+        if student_role_config is None or grade_roles is None:
+            return "학생 자동 역할 설정이 없어 학년 역할 동기화는 건너뛰었습니다."
+
+        summary = {
+            "updated": 0,
+            "unchanged": 0,
+            "skipped_admin": 0,
+            "skipped_unverified": 0,
+            "skipped_unmatched": 0,
+            "failed": 0,
+        }
+        sample_errors: list[str] = []
+        reason = f"{source_label} by {requester} ({requester.id})"
+
+        for member in guild.members:
+            if member.bot:
+                continue
+
+            if self.member_is_student_role_bypass(member, config):
+                summary["skipped_admin"] += 1
+                continue
+
+            record = self.bot.school_verification_store.get_record(guild.id, member.id)
+            before_roles = {role.id for role in member.roles}
+
+            try:
+                if record is None:
+                    await self.sync_student_roles_for_member(
+                        member,
+                        config,
+                        verified_email=None,
+                        reason=reason,
+                    )
+                    after_roles = {role.id for role in member.roles}
+                    if before_roles != after_roles:
+                        summary["updated"] += 1
+                    else:
+                        summary["skipped_unverified"] += 1
+                    continue
+
+                assigned_role_name = await self.sync_student_roles_for_member(
+                    member,
+                    config,
+                    verified_email=record.email,
+                    reason=reason,
+                )
+            except discord.HTTPException as error:
+                summary["failed"] += 1
+                if len(sample_errors) < 5:
+                    sample_errors.append(f"{member.display_name}: {error}")
+                continue
+
+            after_roles = {role.id for role in member.roles}
+            if before_roles != after_roles:
+                summary["updated"] += 1
+            elif assigned_role_name is None:
+                summary["skipped_unmatched"] += 1
+            else:
+                summary["unchanged"] += 1
+
+        lines = [
+            "학생 자동 역할 동기화를 완료했습니다.",
+            (
+                f"3학년 앞자리: `{student_role_config.third_grade_prefix}` -> "
+                f"{grade_roles['3학년'].mention}"
+            ),
+            (
+                f"2학년 앞자리: `{student_role_config.second_grade_prefix}` -> "
+                f"{grade_roles['2학년'].mention}"
+            ),
+            (
+                f"1학년 앞자리: `{student_role_config.first_grade_prefix}` -> "
+                f"{grade_roles['1학년'].mention}"
+            ),
+            "",
+            f"변경됨: {summary['updated']}명",
+            f"이미 정상: {summary['unchanged']}명",
+            f"관리자/예외 제외: {summary['skipped_admin']}명",
+            f"미인증 제외: {summary['skipped_unverified']}명",
+            f"앞자리 불일치: {summary['skipped_unmatched']}명",
+            f"실패: {summary['failed']}명",
+        ]
+        if sample_errors:
+            lines.extend(["", "오류 예시:", *sample_errors])
+
+        return "\n".join(lines)
+
+    async def configure_student_roles(
+        self,
+        guild: discord.Guild,
+        requester: discord.Member,
+        *,
+        third_grade_prefix: int,
+        second_grade_prefix: int,
+        first_grade_prefix: int,
+        admin_role: discord.Role | None,
+    ) -> tuple[SchoolAuthGuildConfig, str]:
+        current = self.get_config(guild.id)
+        if current is None:
+            raise ValueError(
+                "학교 인증 설정이 먼저 필요합니다. `/학교인증설정`을 먼저 실행해 주세요."
+            )
+
+        role_specs = [
+            ("3학년", THIRD_GRADE_ROLE_NAME),
+            ("2학년", SECOND_GRADE_ROLE_NAME),
+            ("1학년", FIRST_GRADE_ROLE_NAME),
+        ]
+        resolved_roles: dict[str, discord.Role] = {}
+        for key, role_name in role_specs:
+            role, role_error = await ensure_student_grade_role(
+                guild,
+                requester,
+                role_name,
+                source_label="/student_setup",
+            )
+            if role_error is not None or role is None:
+                raise ValueError(role_error or "학년 역할을 준비하지 못했습니다.")
+            resolved_roles[key] = role
+
+        student_role_config = StudentRoleConfig(
+            third_grade_prefix=third_grade_prefix,
+            second_grade_prefix=second_grade_prefix,
+            first_grade_prefix=first_grade_prefix,
+            third_grade_role_id=resolved_roles["3학년"].id,
+            second_grade_role_id=resolved_roles["2학년"].id,
+            first_grade_role_id=resolved_roles["1학년"].id,
+            admin_role_id=admin_role.id if admin_role is not None else None,
+        )
+        self.bot.school_auth_config_store.update_student_role_config(
+            guild.id,
+            student_role_config,
+        )
+        updated_config = self.get_config(guild.id)
+        if updated_config is None:
+            raise ValueError("학생 자동 역할 설정 저장에 실패했습니다.")
+
+        sync_summary = await self.sync_student_roles(
+            guild,
+            updated_config,
+            requester=requester,
+            source_label="/student_setup",
+        )
+        return updated_config, sync_summary
 
     def member_is_bypass(
         self,
@@ -417,6 +673,15 @@ class SchoolAuthCog(commands.Cog):
             google_sub=google_sub,
             email=email,
         )
+        try:
+            await self.sync_student_roles_for_member(
+                member,
+                config,
+                verified_email=email,
+                reason=f"school_auth verified: {email}",
+            )
+        except discord.HTTPException:
+            pass
 
     async def handle_google_callback(self, request: web.Request) -> web.Response:
         if not self.is_google_configured:
@@ -811,6 +1076,7 @@ class SchoolAuthCog(commands.Cog):
             verified_role_id=verified_role.id,
             bypass_role_id=bypass_role.id if bypass_role is not None else None,
             panel_message_id=current.panel_message_id if current else None,
+            student_role_config=current.student_role_config if current else None,
         )
 
         await self.configure_auth_space_permissions(
@@ -871,6 +1137,13 @@ class SchoolAuthCog(commands.Cog):
             f"봇 제외: {member_summary['bots_skipped']}명",
             f"역할 변경 실패: {member_summary['failed']}명",
         ]
+        if config.student_role_config is not None:
+            lines.extend(
+                [
+                    "",
+                    "학생 자동 역할 설정이 저장되어 있어 인증된 학교 메일 앞자리 기준 학년 역할도 자동 반영됩니다.",
+                ]
+            )
         return "\n".join(lines)
 
     @app_commands.command(name="school_auth", description="학교 Google 계정 인증 링크 발급")
@@ -933,13 +1206,26 @@ class SchoolAuthCog(commands.Cog):
             )
             return
 
-        await interaction.followup.send(
-            self.build_setup_summary(
+        student_sync_message = None
+        if config.student_role_config is not None:
+            student_sync_message = await self.sync_student_roles(
+                interaction.guild,
                 config,
-                member_summary,
-                updated_channels,
-                failed_channels,
-            ),
+                requester=interaction.user,
+                source_label="/school_auth_setup",
+            )
+
+        response = self.build_setup_summary(
+            config,
+            member_summary,
+            updated_channels,
+            failed_channels,
+        )
+        if student_sync_message is not None:
+            response = f"{response}\n\n{student_sync_message}"
+
+        await interaction.followup.send(
+            response,
             ephemeral=True,
         )
 
@@ -983,15 +1269,112 @@ class SchoolAuthCog(commands.Cog):
             )
             return
 
-        await interaction.followup.send(
-            self.build_setup_summary(
+        student_sync_message = None
+        if config.student_role_config is not None:
+            student_sync_message = await self.sync_student_roles(
+                interaction.guild,
                 config,
-                member_summary,
-                updated_channels,
-                failed_channels,
-            ),
+                requester=interaction.user,
+                source_label="/school_auth_sync",
+            )
+
+        response = self.build_setup_summary(
+            config,
+            member_summary,
+            updated_channels,
+            failed_channels,
+        )
+        if student_sync_message is not None:
+            response = f"{response}\n\n{student_sync_message}"
+
+        await interaction.followup.send(
+            response,
             ephemeral=True,
         )
+
+    @app_commands.command(
+        name="student_setup",
+        description="인증된 학교 메일 앞자리 기준 학년 역할 자동 설정",
+    )
+    @app_commands.rename(
+        third_grade_prefix="3",
+        second_grade_prefix="2",
+        first_grade_prefix="1",
+        admin_role="관리자",
+    )
+    @app_commands.describe(
+        third_grade_prefix="3학년으로 볼 학교 메일 앞자리 숫자",
+        second_grade_prefix="2학년으로 볼 학교 메일 앞자리 숫자",
+        first_grade_prefix="1학년으로 볼 학교 메일 앞자리 숫자",
+        admin_role="학생 자동 역할 부여에서 제외할 관리자 역할",
+    )
+    @app_commands.default_permissions(administrator=True)
+    async def student_setup(
+        self,
+        interaction: discord.Interaction,
+        third_grade_prefix: app_commands.Range[int, 0, 9],
+        second_grade_prefix: app_commands.Range[int, 0, 9],
+        first_grade_prefix: app_commands.Range[int, 0, 9],
+        admin_role: discord.Role | None = None,
+    ) -> None:
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message(
+                "이 명령어는 서버에서만 사용할 수 있습니다.",
+                ephemeral=True,
+            )
+            return
+
+        prefixes = {
+            third_grade_prefix,
+            second_grade_prefix,
+            first_grade_prefix,
+        }
+        if len(prefixes) < 3:
+            await interaction.response.send_message(
+                "3학년, 2학년, 1학년 앞자리 숫자는 서로 다르게 입력해 주세요.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            config, sync_summary = await self.configure_student_roles(
+                interaction.guild,
+                interaction.user,
+                third_grade_prefix=third_grade_prefix,
+                second_grade_prefix=second_grade_prefix,
+                first_grade_prefix=first_grade_prefix,
+                admin_role=admin_role,
+            )
+        except ValueError as error:
+            await interaction.followup.send(str(error), ephemeral=True)
+            return
+        except discord.HTTPException as error:
+            await interaction.followup.send(
+                f"학생 자동 역할 설정 중 Discord 오류가 발생했습니다: {error}",
+                ephemeral=True,
+            )
+            return
+
+        student_role_config = config.student_role_config
+        if student_role_config is None:
+            await interaction.followup.send(
+                "학생 자동 역할 설정 저장에 실패했습니다.",
+                ephemeral=True,
+            )
+            return
+
+        lines = [
+            "학생 자동 역할 설정을 저장했습니다.",
+            f"인증된 학교 메일 앞자리 `{student_role_config.third_grade_prefix}` -> {THIRD_GRADE_ROLE_NAME}",
+            f"인증된 학교 메일 앞자리 `{student_role_config.second_grade_prefix}` -> {SECOND_GRADE_ROLE_NAME}",
+            f"인증된 학교 메일 앞자리 `{student_role_config.first_grade_prefix}` -> {FIRST_GRADE_ROLE_NAME}",
+        ]
+        if admin_role is not None:
+            lines.append(f"제외 관리자 역할: {admin_role.mention}")
+
+        lines.extend(["", sync_summary])
+        await interaction.followup.send("\n".join(lines), ephemeral=True)
 
     @app_commands.command(
         name="school_auth_status",
@@ -1061,6 +1444,12 @@ class SchoolAuthCog(commands.Cog):
                         unverified_role,
                         reason="school_auth returning verified member",
                     )
+                await self.sync_student_roles_for_member(
+                    member,
+                    config,
+                    verified_email=record.email,
+                    reason="school_auth returning verified member",
+                )
                 return
 
             if unverified_role not in member.roles:

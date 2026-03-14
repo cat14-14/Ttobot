@@ -16,6 +16,18 @@ class SchoolAuthGuildConfig:
     verified_role_id: int
     bypass_role_id: int | None = None
     panel_message_id: int | None = None
+    student_role_config: "StudentRoleConfig | None" = None
+
+
+@dataclass(frozen=True)
+class StudentRoleConfig:
+    third_grade_prefix: int
+    second_grade_prefix: int
+    first_grade_prefix: int
+    third_grade_role_id: int
+    second_grade_role_id: int
+    first_grade_role_id: int
+    admin_role_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +106,10 @@ class SchoolAuthConfigStore:
             except (TypeError, ValueError):
                 panel_message_id = None
 
+        student_role_config = self._parse_student_role_config(
+            raw_config.get("student_role_config")
+        )
+
         if not domain:
             return None
 
@@ -106,7 +122,60 @@ class SchoolAuthConfigStore:
             verified_role_id=verified_role_id,
             bypass_role_id=bypass_role_id,
             panel_message_id=panel_message_id,
+            student_role_config=student_role_config,
         )
+
+    def _parse_student_role_config(
+        self,
+        raw_student_role_config: object,
+    ) -> StudentRoleConfig | None:
+        if not isinstance(raw_student_role_config, dict):
+            return None
+
+        try:
+            third_grade_prefix = int(raw_student_role_config["third_grade_prefix"])
+            second_grade_prefix = int(raw_student_role_config["second_grade_prefix"])
+            first_grade_prefix = int(raw_student_role_config["first_grade_prefix"])
+            third_grade_role_id = int(raw_student_role_config["third_grade_role_id"])
+            second_grade_role_id = int(raw_student_role_config["second_grade_role_id"])
+            first_grade_role_id = int(raw_student_role_config["first_grade_role_id"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+        raw_admin_role_id = raw_student_role_config.get("admin_role_id")
+        admin_role_id: int | None = None
+        if raw_admin_role_id not in (None, ""):
+            try:
+                admin_role_id = int(raw_admin_role_id)
+            except (TypeError, ValueError):
+                admin_role_id = None
+
+        return StudentRoleConfig(
+            third_grade_prefix=third_grade_prefix,
+            second_grade_prefix=second_grade_prefix,
+            first_grade_prefix=first_grade_prefix,
+            third_grade_role_id=third_grade_role_id,
+            second_grade_role_id=second_grade_role_id,
+            first_grade_role_id=first_grade_role_id,
+            admin_role_id=admin_role_id,
+        )
+
+    def _serialize_student_role_config(
+        self,
+        student_role_config: StudentRoleConfig | None,
+    ) -> dict[str, object] | None:
+        if student_role_config is None:
+            return None
+
+        return {
+            "third_grade_prefix": student_role_config.third_grade_prefix,
+            "second_grade_prefix": student_role_config.second_grade_prefix,
+            "first_grade_prefix": student_role_config.first_grade_prefix,
+            "third_grade_role_id": student_role_config.third_grade_role_id,
+            "second_grade_role_id": student_role_config.second_grade_role_id,
+            "first_grade_role_id": student_role_config.first_grade_role_id,
+            "admin_role_id": student_role_config.admin_role_id,
+        }
 
     def _serialize_config(self, config: SchoolAuthGuildConfig) -> dict[str, object]:
         return {
@@ -118,6 +187,9 @@ class SchoolAuthConfigStore:
             "verified_role_id": config.verified_role_id,
             "bypass_role_id": config.bypass_role_id,
             "panel_message_id": config.panel_message_id,
+            "student_role_config": self._serialize_student_role_config(
+                config.student_role_config
+            ),
         }
 
     def get_config(self, guild_id: int) -> SchoolAuthGuildConfig | None:
@@ -143,6 +215,30 @@ class SchoolAuthConfigStore:
                 verified_role_id=config.verified_role_id,
                 bypass_role_id=config.bypass_role_id,
                 panel_message_id=message_id,
+                student_role_config=config.student_role_config,
+            )
+        )
+
+    def update_student_role_config(
+        self,
+        guild_id: int,
+        student_role_config: StudentRoleConfig | None,
+    ) -> None:
+        config = self.get_config(guild_id)
+        if config is None:
+            return
+
+        self.set_config(
+            SchoolAuthGuildConfig(
+                guild_id=config.guild_id,
+                domain=config.domain,
+                auth_category_id=config.auth_category_id,
+                auth_channel_id=config.auth_channel_id,
+                unverified_role_id=config.unverified_role_id,
+                verified_role_id=config.verified_role_id,
+                bypass_role_id=config.bypass_role_id,
+                panel_message_id=config.panel_message_id,
+                student_role_config=student_role_config,
             )
         )
 
