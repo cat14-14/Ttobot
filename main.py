@@ -36,7 +36,7 @@ def load_token() -> str:
 
 TOKEN = load_token()
 SYNC_GUILD_ID = os.getenv("DISCORD_GUILD_ID")
-SYNC_COMMANDS_ON_STARTUP = get_bool_env("SYNC_COMMANDS_ON_STARTUP")
+SYNC_COMMANDS_ON_STARTUP = get_bool_env("SYNC_COMMANDS_ON_STARTUP", default=True)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL")
 RENDER_PORT = os.getenv("PORT")
