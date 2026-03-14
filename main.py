@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 import aiohttp
+import discord
 from dotenv import load_dotenv
 
 from bot import CoraxBot
@@ -12,9 +13,16 @@ from services.instance_lock import InstanceLock, InstanceLockError
 
 load_dotenv()
 
-TOKEN = validate_discord_token(
-    os.getenv("DISCORD_TOKEN") or os.getenv("DISCORD_BOT_TOKEN")
-)
+def load_token() -> str:
+    try:
+        return validate_discord_token(
+            os.getenv("DISCORD_TOKEN") or os.getenv("DISCORD_BOT_TOKEN")
+        )
+    except ValueError as error:
+        raise SystemExit(f"Discord 봇 토큰 설정 오류: {error}") from error
+
+
+TOKEN = load_token()
 SYNC_GUILD_ID = os.getenv("DISCORD_GUILD_ID")
 SYNC_COMMANDS_ON_STARTUP = os.getenv("SYNC_COMMANDS_ON_STARTUP", "").lower() in {
     "1",
@@ -62,6 +70,12 @@ try:
         try:
             bot.run(TOKEN)
             break
+        except discord.LoginFailure as error:
+            raise SystemExit(
+                "Discord 봇 토큰이 잘못되었거나 이미 폐기되었습니다. "
+                "Render 환경변수 `DISCORD_BOT_TOKEN` 또는 `DISCORD_TOKEN`에 "
+                "Discord Developer Portal에서 새로 발급한 Bot Token을 넣고 다시 배포하세요."
+            ) from error
         except (
             aiohttp.ClientConnectorError,
             aiohttp.ClientConnectorDNSError,
