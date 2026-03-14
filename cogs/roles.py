@@ -868,25 +868,6 @@ async def ensure_student_grade_role(
     return created_role, None
 
 
-def get_school_verified_role(
-    bot: "CoraxBot",
-    guild: discord.Guild,
-) -> tuple[discord.Role | None, str | None]:
-    config_store = getattr(bot, "school_auth_config_store", None)
-    if config_store is None:
-        return None, None
-
-    config = config_store.get_config(guild.id)
-    if config is None:
-        return None, None
-
-    verified_role = guild.get_role(config.verified_role_id)
-    if verified_role is None:
-        return None, "학교 인증 완료 역할을 찾지 못했습니다. `/학교인증동기화`를 먼저 실행해 주세요."
-
-    return verified_role, None
-
-
 async def sync_student_grade_roles(
     bot: "CoraxBot",
     requester: discord.Member,
@@ -910,10 +891,6 @@ async def sync_student_grade_roles(
     if bot_member is None:
         return "봇 멤버 정보를 확인할 수 없습니다.", False
 
-    verified_role, verified_role_error = get_school_verified_role(bot, guild)
-    if verified_role_error is not None:
-        return verified_role_error, False
-
     grade_roles: dict[str, discord.Role] = {}
     for role_name in STUDENT_GRADE_ROLE_NAMES:
         role, role_error = await ensure_student_grade_role(
@@ -936,7 +913,6 @@ async def sync_student_grade_roles(
         "updated": 0,
         "unchanged": 0,
         "skipped_admin": 0,
-        "skipped_unverified": 0,
         "skipped_unmatched": 0,
         "skipped_unmanageable": 0,
         "failed": 0,
@@ -949,10 +925,6 @@ async def sync_student_grade_roles(
 
         if member.guild_permissions.administrator or admin_role in member.roles:
             summary["skipped_admin"] += 1
-            continue
-
-        if verified_role is not None and verified_role not in member.roles:
-            summary["skipped_unverified"] += 1
             continue
 
         leading_digit = extract_student_prefix(member)
@@ -1005,16 +977,11 @@ async def sync_student_grade_roles(
         f"2학년 시작 숫자: `{second_grade_prefix}` -> {grade_roles['2학년'].mention}",
         f"1학년 시작 숫자: `{first_grade_prefix}` -> {grade_roles['1학년'].mention}",
         f"관리자 제외 역할: {admin_role.mention}",
-        (
-            f"학교 인증 완료 역할만 처리: {verified_role.mention}"
-            if verified_role is not None
-            else "학교 인증 설정 없음: 전체 학생 대상"
-        ),
+        "처리 대상: 전체 학생",
         "",
         f"변경됨: {summary['updated']}명",
         f"이미 정상: {summary['unchanged']}명",
         f"관리자 제외: {summary['skipped_admin']}명",
-        f"학교 인증 안됨: {summary['skipped_unverified']}명",
         f"숫자 불일치/없음: {summary['skipped_unmatched']}명",
         f"권한상 제외: {summary['skipped_unmanageable']}명",
         f"실패: {summary['failed']}명",

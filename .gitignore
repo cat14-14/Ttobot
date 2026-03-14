@@ -18,8 +18,6 @@ poll_records.json
 remind_records.json
 schedule_records.json
 warn_records.json
-school_auth_configs.json
-school_verifications.json
 
 credentials*.json
 token.json

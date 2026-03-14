@@ -17,12 +17,12 @@ def parse_args() -> argparse.Namespace:
         "--guild",
         action="append",
         dest="guild_ids",
-        help="동기화할 서버 ID. 여러 번 지정 가능",
+        help="동기화할 서버 ID. 여러 번 지정할 수 있습니다.",
     )
     parser.add_argument(
         "--all",
         action="store_true",
-        help="봇이 들어가 있는 모든 서버에 동기화",
+        help="봇이 들어가 있는 모든 서버에 동기화합니다.",
     )
     return parser.parse_args()
 
@@ -68,7 +68,7 @@ async def main() -> None:
     args = parse_args()
 
     if not args.all and not args.guild_ids:
-        raise SystemExit("`--all` 또는 `--guild 서버ID` 중 하나는 꼭 지정해야 합니다.")
+        raise SystemExit("`--all` 또는 `--guild 서버ID` 중 하나는 지정해야 합니다.")
 
     base_dir = Path(__file__).resolve().parent
     load_dotenv(base_dir / ".env")
@@ -78,13 +78,6 @@ async def main() -> None:
     )
     gemini_api_key = os.getenv("GEMINI_API_KEY")
     gemini_model = os.getenv("GEMINI_MODEL")
-    google_client_id = os.getenv("GOOGLE_CLIENT_ID")
-    google_client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
-    google_redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
-    school_auth_bind_host = os.getenv("SCHOOL_AUTH_BIND_HOST")
-    school_auth_bind_port = int(
-        os.getenv("SCHOOL_AUTH_BIND_PORT") or os.getenv("PORT") or "8080"
-    )
 
     guild_ids: list[int] | None = None
     if args.guild_ids:
@@ -100,12 +93,6 @@ async def main() -> None:
         sync_all_guilds=args.all,
         gemini_api_key=gemini_api_key,
         gemini_model=gemini_model,
-        google_client_id=google_client_id,
-        google_client_secret=google_client_secret,
-        google_redirect_uri=google_redirect_uri,
-        school_auth_bind_host=school_auth_bind_host,
-        school_auth_bind_port=school_auth_bind_port,
-        enable_school_auth_web_server=False,
     )
     await bot.start(token)
 

@@ -13,35 +13,31 @@ from services.instance_lock import InstanceLock, InstanceLockError
 
 load_dotenv()
 
+
+def get_bool_env(name: str, default: bool = False) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def load_token() -> str:
     try:
         return validate_discord_token(
             os.getenv("DISCORD_TOKEN") or os.getenv("DISCORD_BOT_TOKEN")
         )
     except ValueError as error:
-        raise SystemExit(f"Discord 봇 토큰 설정 오류: {error}") from error
+        raise SystemExit(f"Discord 토큰 설정 오류: {error}") from error
 
 
 TOKEN = load_token()
 SYNC_GUILD_ID = os.getenv("DISCORD_GUILD_ID")
-SYNC_COMMANDS_ON_STARTUP = os.getenv("SYNC_COMMANDS_ON_STARTUP", "").lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
-}
+SYNC_COMMANDS_ON_STARTUP = get_bool_env("SYNC_COMMANDS_ON_STARTUP")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL")
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI")
-RENDER_PORT = os.getenv("PORT")
-SCHOOL_AUTH_BIND_HOST = os.getenv(
-    "SCHOOL_AUTH_BIND_HOST",
-    "0.0.0.0" if RENDER_PORT else "127.0.0.1",
-)
-SCHOOL_AUTH_BIND_PORT = int(os.getenv("SCHOOL_AUTH_BIND_PORT") or RENDER_PORT or "8080")
 BASE_DIR = Path(__file__).resolve().parent
+
 
 def create_bot() -> CoraxBot:
     return CoraxBot(
@@ -50,13 +46,8 @@ def create_bot() -> CoraxBot:
         sync_commands_on_startup=SYNC_COMMANDS_ON_STARTUP,
         gemini_api_key=GEMINI_API_KEY,
         gemini_model=GEMINI_MODEL,
-        google_client_id=GOOGLE_CLIENT_ID,
-        google_client_secret=GOOGLE_CLIENT_SECRET,
-        google_redirect_uri=GOOGLE_REDIRECT_URI,
-        school_auth_bind_host=SCHOOL_AUTH_BIND_HOST,
-        school_auth_bind_port=SCHOOL_AUTH_BIND_PORT,
-        enable_school_auth_web_server=True,
     )
+
 
 lock = InstanceLock(BASE_DIR / ".corax.lock")
 try:
@@ -72,9 +63,9 @@ try:
             break
         except discord.LoginFailure as error:
             raise SystemExit(
-                "Discord 봇 토큰이 잘못되었거나 이미 폐기되었습니다. "
+                "Discord 봇 토큰이 잘못됐거나 이미 폐기됐습니다. "
                 "Render 환경변수 `DISCORD_BOT_TOKEN` 또는 `DISCORD_TOKEN`에 "
-                "Discord Developer Portal에서 새로 발급한 Bot Token을 넣고 다시 배포하세요."
+                "Discord Developer Portal에서 다시 발급한 Bot Token 본문만 넣고 재배포해 주세요."
             ) from error
         except (
             aiohttp.ClientConnectorError,
@@ -82,7 +73,7 @@ try:
             socket.gaierror,
         ) as error:
             print(f"Discord 연결 실패: {error}")
-            print("인터넷 또는 DNS 문제입니다. 5초 뒤 다시 연결합니다.")
+            print("인터넷 또는 DNS 문제입니다. 5초 뒤에 다시 연결합니다.")
             time.sleep(5)
 finally:
     lock.release()

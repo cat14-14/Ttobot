@@ -9,7 +9,6 @@ charset_normalizer==3.4.5
 deep-translator==1.11.4
 discord.py==2.7.1
 frozenlist==1.8.0
-google-auth==2.41.1
 idna==3.11
 multidict==6.7.1
 propcache==0.4.1

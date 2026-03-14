@@ -14,6 +14,40 @@ if TYPE_CHECKING:
 BambooChannel = discord.TextChannel | discord.ForumChannel
 
 
+class BambooPostModal(discord.ui.Modal, title="대나무숲 익명 글"):
+    post_title = discord.ui.TextInput(
+        label="제목",
+        placeholder="익명으로 올릴 글 제목",
+        min_length=1,
+        max_length=100,
+    )
+    post_content = discord.ui.TextInput(
+        label="내용",
+        placeholder="익명으로 올릴 내용을 입력해 주세요.",
+        style=discord.TextStyle.paragraph,
+        min_length=1,
+        max_length=4000,
+    )
+
+    def __init__(
+        self,
+        cog: "BambooCog",
+        *,
+        image: discord.Attachment | None,
+    ) -> None:
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.image = image
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.cog.publish_from_modal(
+            interaction,
+            title=str(self.post_title),
+            content=str(self.post_content),
+            image=self.image,
+        )
+
+
 class BambooCog(commands.Cog):
     def __init__(self, bot: "CoraxBot"):
         self.bot = bot
@@ -116,6 +150,110 @@ class BambooCog(commands.Cog):
             ".webp",
         }
 
+    def normalize_post_fields(self, title: str, content: str) -> tuple[str, str]:
+        normalized_title = title.strip()
+        normalized_content = content.strip()
+        if not normalized_title or not normalized_content:
+            raise ValueError("제목과 내용은 공백만으로 작성할 수 없습니다.")
+
+        return normalized_title, normalized_content
+
+    def get_publish_target_error(
+        self,
+        interaction: discord.Interaction,
+        *,
+        image: discord.Attachment | None,
+    ) -> tuple[BambooChannel | None, str | None]:
+        if interaction.guild is None:
+            return None, "이 명령어는 서버에서만 사용할 수 있습니다."
+
+        channel = self.get_bamboo_channel(interaction)
+        if channel is None:
+            return (
+                None,
+                "대나무숲 채널이 설정되지 않았습니다. `/대나무숲채널설정`으로 먼저 지정해 주세요.",
+            )
+
+        if isinstance(channel, discord.TextChannel):
+            if not self.bot_can_send_to_text(channel):
+                return (
+                    None,
+                    f"{channel.mention} 채널에 메시지를 보낼 권한이 없습니다.",
+                )
+        else:
+            if not self.bot_can_send_to_forum(channel):
+                return (
+                    None,
+                    f"{channel.mention} 포럼 채널에 글을 올릴 권한이 없습니다.",
+                )
+
+            tag_error = self.get_forum_tag_error(channel)
+            if tag_error is not None:
+                return None, tag_error
+
+        if image is not None and not self.is_supported_image_attachment(image):
+            return (
+                None,
+                "사진은 PNG, JPG, JPEG, GIF, WEBP 형식의 이미지 파일만 첨부할 수 있습니다.",
+            )
+
+        if image is not None and not self.bot_can_attach_files(channel):
+            return None, f"{channel.mention} 채널에 파일을 첨부할 권한이 없습니다."
+
+        return channel, None
+
+    async def publish_from_modal(
+        self,
+        interaction: discord.Interaction,
+        *,
+        title: str,
+        content: str,
+        image: discord.Attachment | None,
+    ) -> None:
+        channel, error = self.get_publish_target_error(interaction, image=image)
+        if error is not None or channel is None:
+            await interaction.response.send_message(
+                error or "대나무숲 채널을 찾지 못했습니다.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            normalized_title, normalized_content = self.normalize_post_fields(
+                title,
+                content,
+            )
+        except ValueError as error:
+            await interaction.response.send_message(str(error), ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            jump_url = await self.publish_to_channel(
+                channel,
+                title=normalized_title,
+                content=normalized_content,
+                image=image,
+            )
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "대나무숲 글을 올릴 권한이 없습니다. 봇 권한을 확인해 주세요.",
+                ephemeral=True,
+            )
+            return
+        except discord.HTTPException as error:
+            await interaction.followup.send(
+                f"대나무숲 글 작성 중 오류가 발생했습니다: {error}",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.followup.send(
+            f"익명 글을 {channel.mention}에 올렸습니다.\n{jump_url}",
+            ephemeral=True,
+        )
+
     async def publish_to_channel(
         self,
         channel: BambooChannel,
@@ -157,103 +295,19 @@ class BambooCog(commands.Cog):
         return created.message.jump_url
 
     @app_commands.command(name="bamboo", description="익명 대나무숲 글 작성")
-    @app_commands.rename(title="제목", content="내용", image="사진")
-    @app_commands.describe(
-        title="대나무숲 글 제목",
-        content="익명으로 올릴 내용",
-        image="함께 올릴 사진 파일",
-    )
+    @app_commands.rename(image="사진")
+    @app_commands.describe(image="함께 올릴 사진 파일")
     async def bamboo(
         self,
         interaction: discord.Interaction,
-        title: app_commands.Range[str, 1, 100],
-        content: app_commands.Range[str, 1, 4000],
         image: discord.Attachment | None = None,
     ) -> None:
-        if interaction.guild is None:
-            await interaction.response.send_message(
-                "이 명령어는 서버에서만 사용할 수 있습니다.",
-                ephemeral=True,
-            )
+        _, error = self.get_publish_target_error(interaction, image=image)
+        if error is not None:
+            await interaction.response.send_message(error, ephemeral=True)
             return
 
-        title = title.strip()
-        content = content.strip()
-        if not title or not content:
-            await interaction.response.send_message(
-                "제목과 내용은 공백만으로 작성할 수 없습니다.",
-                ephemeral=True,
-            )
-            return
-
-        channel = self.get_bamboo_channel(interaction)
-        if channel is None:
-            await interaction.response.send_message(
-                "대나무숲 채널이 설정되지 않았습니다. `/대나무숲채널설정`으로 먼저 지정해 주세요.",
-                ephemeral=True,
-            )
-            return
-
-        if isinstance(channel, discord.TextChannel):
-            if not self.bot_can_send_to_text(channel):
-                await interaction.response.send_message(
-                    f"{channel.mention} 채널에 메시지를 보낼 권한이 없습니다.",
-                    ephemeral=True,
-                )
-                return
-        else:
-            if not self.bot_can_send_to_forum(channel):
-                await interaction.response.send_message(
-                    f"{channel.mention} 포럼 채널에 글을 올릴 권한이 없습니다.",
-                    ephemeral=True,
-                )
-                return
-
-            tag_error = self.get_forum_tag_error(channel)
-            if tag_error is not None:
-                await interaction.response.send_message(tag_error, ephemeral=True)
-                return
-
-        if image is not None and not self.is_supported_image_attachment(image):
-            await interaction.response.send_message(
-                "사진은 PNG, JPG, JPEG, GIF, WEBP 형식의 이미지 파일만 첨부할 수 있습니다.",
-                ephemeral=True,
-            )
-            return
-
-        if image is not None and not self.bot_can_attach_files(channel):
-            await interaction.response.send_message(
-                f"{channel.mention} 채널에 파일을 첨부할 권한이 없습니다.",
-                ephemeral=True,
-            )
-            return
-
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
-        try:
-            jump_url = await self.publish_to_channel(
-                channel,
-                title=title,
-                content=content,
-                image=image,
-            )
-        except discord.Forbidden:
-            await interaction.followup.send(
-                "대나무숲 글을 올릴 권한이 없습니다. 봇 권한을 확인해 주세요.",
-                ephemeral=True,
-            )
-            return
-        except discord.HTTPException as error:
-            await interaction.followup.send(
-                f"대나무숲 글 작성 중 오류가 발생했습니다: {error}",
-                ephemeral=True,
-            )
-            return
-
-        await interaction.followup.send(
-            f"익명 글을 {channel.mention}에 올렸습니다.\n{jump_url}",
-            ephemeral=True,
-        )
+        await interaction.response.send_modal(BambooPostModal(self, image=image))
 
     @app_commands.command(name="bamboo_channel_set", description="대나무숲 채널 지정")
     @app_commands.rename(channel="채널")
