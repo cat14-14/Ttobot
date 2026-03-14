@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands
 
 from services.announce_config import AnnounceChannelStore
+from services.bamboo_config import BambooChannelStore
 from services.gemini_client import GeminiService
 from services.localization import CoraxTranslator
 from services.poll_store import PollStore
@@ -37,6 +38,7 @@ class CoraxBot(commands.Bot):
         self.sync_guild_id = sync_guild_id
         self.sync_commands_on_startup = sync_commands_on_startup
         self.announce_store = AnnounceChannelStore(base_dir / "announce_channels.json")
+        self.bamboo_store = BambooChannelStore(base_dir / "bamboo_channels.json")
         self.gemini_service = GeminiService(
             api_key=gemini_api_key,
             model=gemini_model or "gemini-2.5-flash-lite",
@@ -71,6 +73,7 @@ class CoraxBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         await self.load_extension("cogs.ai")
+        await self.load_extension("cogs.bamboo")
         await self.load_extension("cogs.dice")
         await self.load_extension("cogs.general")
         await self.load_extension("cogs.school_auth")

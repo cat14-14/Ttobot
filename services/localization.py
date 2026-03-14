@@ -13,6 +13,9 @@ KOREAN_TRANSLATIONS: dict[str, str] = {
     "announce": "\uacf5\uc9c0",
     "announce_channel_set": "\uacf5\uc9c0\ucc44\ub110\uc124\uc815",
     "announce_channel_clear": "\uacf5\uc9c0\ucc44\ub110\ud574\uc81c",
+    "bamboo": "\ub300\ub098\ubb34\uc232",
+    "bamboo_channel_set": "\ub300\ub098\ubb34\uc232\ucc44\ub110\uc124\uc815",
+    "bamboo_channel_clear": "\ub300\ub098\ubb34\uc232\ucc44\ub110\ud574\uc81c",
     "clear": "\uccad\uc18c",
     "clear_all": "\uc804\uccb4\uccad\uc18c",
     "move": "\uc774\ub3d9",
@@ -50,6 +53,13 @@ ENGLISH_TRANSLATIONS: dict[str, str] = {
     "\uacf5\uc9c0 \ucc44\ub110 \uc9c0\uc815": "Set the announcement channel",
     "\uacf5\uc9c0 \uba54\uc2dc\uc9c0\ub97c \ubcf4\ub0bc \ucc44\ub110": "Channel to send announcements to",
     "\uacf5\uc9c0 \ucc44\ub110 \ud574\uc81c": "Clear the announcement channel",
+    "\uc775\uba85 \ub300\ub098\ubb34\uc232 \uae00 \uc791\uc131": "Create an anonymous bamboo forest post",
+    "\ub300\ub098\ubb34\uc232 \uae00 \uc81c\ubaa9": "Bamboo forest post title",
+    "\uc775\uba85\uc73c\ub85c \uc62c\ub9b4 \ub0b4\uc6a9": "Content to post anonymously",
+    "\ud568\uaed8 \uc62c\ub9b4 \uc0ac\uc9c4 \ud30c\uc77c": "Image file to attach",
+    "\ub300\ub098\ubb34\uc232 \ucc44\ub110 \uc9c0\uc815": "Set the bamboo forest channel",
+    "\uc775\uba85 \uae00\uc774 \uc62c\ub77c\uac08 \ud14d\uc2a4\ud2b8 \ucc44\ub110 \ub610\ub294 \ud3ec\ub7fc \ucc44\ub110": "Text or forum channel where anonymous posts will be sent",
+    "\ub300\ub098\ubb34\uc232 \ucc44\ub110 \ud574\uc81c": "Clear the bamboo forest channel",
     "\ucd5c\uadfc \uba54\uc2dc\uc9c0 \uc0ad\uc81c": "Delete recent messages",
     "\uc0ad\uc81c\ud560 \ucd5c\uadfc \uba54\uc2dc\uc9c0 \uc218 (1~100)": "Number of recent messages to delete (1-100)",
     "\uc774 \ucc44\ub110\uc758 \uc624\ub798\ub41c \uba54\uc2dc\uc9c0\ub97c \ud3ec\ud568\ud574 \ubaa8\ub450 \uc0ad\uc81c": "Delete all messages in this channel, including old ones",
@@ -153,6 +163,9 @@ HELP_MESSAGES: dict[str, str] = {
         "/\uacf5\uc9c0 - \uc81c\ubaa9/\ub0b4\uc6a9\uc5d0 \ub9c1\ud06c\uc640 \uc0ac\uc9c4\uc744 \ucd94\uac00\ud574 @everyone \uacf5\uc9c0 \uc804\uc1a1\n"
         "/\uacf5\uc9c0\ucc44\ub110\uc124\uc815 - \uacf5\uc9c0 \ucc44\ub110 \uc9c0\uc815\n"
         "/\uacf5\uc9c0\ucc44\ub110\ud574\uc81c - \uacf5\uc9c0 \ucc44\ub110 \ud574\uc81c\n"
+        "/\ub300\ub098\ubb34\uc232 - \uc81c\ubaa9/\ub0b4\uc6a9/\uc0ac\uc9c4\uc73c\ub85c \uc775\uba85 \uac8c\uc2dc\ubb3c \uc791\uc131\n"
+        "/\ub300\ub098\ubb34\uc232\ucc44\ub110\uc124\uc815 - \ub300\ub098\ubb34\uc232 \ucc44\ub110 \uc9c0\uc815\n"
+        "/\ub300\ub098\ubb34\uc232\ucc44\ub110\ud574\uc81c - \ub300\ub098\ubb34\uc232 \ucc44\ub110 \ud574\uc81c\n"
         "\uba54\uc2dc\uc9c0 \uc6b0\ud074\ub9ad > \uc571 > \uba54\uc2dc\uc9c0 \uc774\ub3d9 - \uc120\ud0dd\ud55c \uba54\uc2dc\uc9c0 1\uac1c \uc774\ub3d9"
     ),
     "en": (
@@ -182,6 +195,9 @@ HELP_MESSAGES: dict[str, str] = {
         "/announce - Send an @everyone announcement with optional links and images\n"
         "/announce_channel_set - Set the announcement channel\n"
         "/announce_channel_clear - Clear the announcement channel\n"
+        "/bamboo - Create an anonymous post with a title, content, and optional image\n"
+        "/bamboo_channel_set - Set the anonymous bamboo forest channel\n"
+        "/bamboo_channel_clear - Clear the anonymous bamboo forest channel\n"
         "Right click a message > Apps > Move Message - Move one selected message"
     ),
 }
