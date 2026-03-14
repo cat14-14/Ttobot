@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import html
-import secrets
+import json
 import time
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode, urlparse
 
@@ -27,15 +29,7 @@ UNVERIFIED_ROLE_NAME = "학교미인증"
 VERIFIED_ROLE_NAME = "학교인증완료"
 GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
-
-
-@dataclass(frozen=True)
-class PendingSchoolAuthSession:
-    state: str
-    guild_id: int
-    user_id: int
-    created_at: float
-    expires_at: float
+STATE_TTL_SECONDS = 600
 
 
 class SchoolAuthLinkView(discord.ui.View):
@@ -71,7 +65,6 @@ class SchoolAuthLaunchView(discord.ui.View):
 class SchoolAuthCog(commands.Cog):
     def __init__(self, bot: "CoraxBot"):
         self.bot = bot
-        self.pending_sessions: dict[str, PendingSchoolAuthSession] = {}
         self.web_runner: web.AppRunner | None = None
         self.web_site: web.TCPSite | None = None
         self.panel_view = SchoolAuthLaunchView(self)
@@ -167,36 +160,69 @@ class SchoolAuthCog(commands.Cog):
         bypass_role = self.get_bypass_role(member.guild, config)
         return bypass_role is not None and bypass_role in member.roles
 
-    def cleanup_pending_sessions(self) -> None:
-        now = time.time()
-        expired_states = [
-            state
-            for state, pending in self.pending_sessions.items()
-            if pending.expires_at <= now
-        ]
-        for state in expired_states:
-            self.pending_sessions.pop(state, None)
+    def _get_state_secret(self) -> bytes:
+        # School auth is only enabled when Google OAuth is configured, so the
+        # client secret can sign short-lived state tokens across restarts.
+        secret = self.bot.google_client_secret or self.bot.google_client_id or "school-auth"
+        return secret.encode("utf-8")
 
-    def create_pending_session(self, guild_id: int, user_id: int) -> PendingSchoolAuthSession:
-        self.cleanup_pending_sessions()
-        state = secrets.token_urlsafe(32)
-        now = time.time()
-        session = PendingSchoolAuthSession(
-            state=state,
-            guild_id=guild_id,
-            user_id=user_id,
-            created_at=now,
-            expires_at=now + 600,
+    def _encode_state_part(self, payload: bytes) -> str:
+        return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+    def _decode_state_part(self, payload: str) -> bytes:
+        padding = "=" * (-len(payload) % 4)
+        return base64.urlsafe_b64decode(payload + padding)
+
+    def create_state_token(self, guild_id: int, user_id: int) -> str:
+        issued_at = int(time.time())
+        payload = {
+            "g": guild_id,
+            "u": user_id,
+            "iat": issued_at,
+            "exp": issued_at + STATE_TTL_SECONDS,
+            "n": hashlib.sha256(
+                f"{guild_id}:{user_id}:{issued_at}:{time.time_ns()}".encode("utf-8")
+            ).hexdigest()[:16],
+        }
+        payload_part = self._encode_state_part(
+            json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
         )
-        self.pending_sessions[state] = session
-        return session
+        signature_part = self._encode_state_part(
+            hmac.new(
+                self._get_state_secret(),
+                payload_part.encode("ascii"),
+                hashlib.sha256,
+            ).digest()
+        )
+        return f"{payload_part}.{signature_part}"
 
-    def pop_pending_session(self, state: str | None) -> PendingSchoolAuthSession | None:
-        self.cleanup_pending_sessions()
-        if state is None:
+    def parse_state_token(self, state: str | None) -> tuple[int, int] | None:
+        if not state or "." not in state:
             return None
 
-        return self.pending_sessions.pop(state, None)
+        payload_part, signature_part = state.split(".", 1)
+        expected_signature = self._encode_state_part(
+            hmac.new(
+                self._get_state_secret(),
+                payload_part.encode("ascii"),
+                hashlib.sha256,
+            ).digest()
+        )
+        if not hmac.compare_digest(signature_part, expected_signature):
+            return None
+
+        try:
+            payload = json.loads(self._decode_state_part(payload_part).decode("utf-8"))
+            guild_id = int(payload["g"])
+            user_id = int(payload["u"])
+            expires_at = int(payload["exp"])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError, UnicodeDecodeError):
+            return None
+
+        if guild_id <= 0 or user_id <= 0 or expires_at <= int(time.time()):
+            return None
+
+        return guild_id, user_id
 
     def build_google_auth_url(self, config: SchoolAuthGuildConfig, state: str) -> str:
         params = {
@@ -408,14 +434,15 @@ class SchoolAuthCog(commands.Cog):
                 success=False,
             )
 
-        pending = self.pop_pending_session(request.query.get("state"))
-        if pending is None:
+        state_info = self.parse_state_token(request.query.get("state"))
+        if state_info is None:
             return self.render_page(
                 "학교 인증 실패",
                 "인증 링크가 만료되었거나 잘못되었습니다. 디스코드에서 다시 인증 버튼을 눌러 주세요.",
                 success=False,
             )
 
+        guild_id, user_id = state_info
         code = request.query.get("code")
         if not code:
             return self.render_page(
@@ -424,7 +451,7 @@ class SchoolAuthCog(commands.Cog):
                 success=False,
             )
 
-        config = self.get_config(pending.guild_id)
+        config = self.get_config(guild_id)
         if config is None:
             return self.render_page(
                 "학교 인증 실패",
@@ -444,8 +471,8 @@ class SchoolAuthCog(commands.Cog):
                 expected_domain=config.domain,
             )
             await self.finish_verification(
-                guild_id=pending.guild_id,
-                user_id=pending.user_id,
+                guild_id=guild_id,
+                user_id=user_id,
                 google_sub=google_sub,
                 email=email,
             )
@@ -525,8 +552,10 @@ class SchoolAuthCog(commands.Cog):
             )
             return
 
-        session = self.create_pending_session(interaction.guild_id, interaction.user.id)
-        auth_url = self.build_google_auth_url(config, session.state)
+        auth_url = self.build_google_auth_url(
+            config,
+            self.create_state_token(interaction.guild_id, interaction.user.id),
+        )
         await interaction.response.send_message(
             (
                 f"`@{config.domain}` 학교 Google 계정으로 로그인해 주세요.\n"
