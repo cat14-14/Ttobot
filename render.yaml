@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: ttobot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    healthCheckPath: /healthz
+    autoDeploy: false
+    envVars:
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash-lite
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: SCHOOL_AUTH_BIND_HOST
+        value: 0.0.0.0
+      - key: SYNC_COMMANDS_ON_STARTUP
+        value: "true"
