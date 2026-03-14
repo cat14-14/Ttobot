@@ -12,21 +12,17 @@ if TYPE_CHECKING:
 
 
 BambooChannel = discord.TextChannel | discord.ForumChannel
+BAMBOO_DISPLAY_NAME = "대나무숲"
+BAMBOO_FORUM_THREAD_NAME = "대나무숲"
 
 
 class BambooPostModal(discord.ui.Modal, title="대나무숲 익명 글"):
-    post_title = discord.ui.TextInput(
-        label="제목",
-        placeholder="익명으로 올릴 글 제목",
-        min_length=1,
-        max_length=100,
-    )
     post_content = discord.ui.TextInput(
         label="내용",
-        placeholder="익명으로 올릴 내용을 입력해 주세요.",
+        placeholder="익명으로 올릴 내용을 입력해 주세요",
         style=discord.TextStyle.paragraph,
         min_length=1,
-        max_length=4000,
+        max_length=2000,
     )
 
     def __init__(
@@ -42,7 +38,6 @@ class BambooPostModal(discord.ui.Modal, title="대나무숲 익명 글"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         await self.cog.publish_from_modal(
             interaction,
-            title=str(self.post_title),
             content=str(self.post_content),
             image=self.image,
         )
@@ -91,7 +86,7 @@ class BambooCog(commands.Cog):
             return False
 
         permissions = channel.permissions_for(member)
-        return permissions.send_messages and permissions.embed_links
+        return permissions.send_messages
 
     def bot_can_send_to_forum(self, channel: discord.ForumChannel) -> bool:
         member = self.get_bot_member(channel.guild)
@@ -99,7 +94,7 @@ class BambooCog(commands.Cog):
             return False
 
         permissions = channel.permissions_for(member)
-        return permissions.send_messages and permissions.embed_links
+        return permissions.send_messages
 
     def bot_can_attach_files(self, channel: BambooChannel) -> bool:
         member = self.get_bot_member(channel.guild)
@@ -127,17 +122,6 @@ class BambooCog(commands.Cog):
             "필수 태그를 끄거나 태그를 1개만 남겨 주세요."
         )
 
-    def build_bamboo_embed(self, title: str, content: str) -> discord.Embed:
-        embed = discord.Embed(
-            title=title,
-            description=content,
-            color=discord.Color.green(),
-            timestamp=discord.utils.utcnow(),
-        )
-        embed.set_author(name="익명 대나무숲")
-        embed.set_footer(text="작성자 정보는 공개되지 않습니다.")
-        return embed
-
     def is_supported_image_attachment(self, attachment: discord.Attachment) -> bool:
         if attachment.content_type and attachment.content_type.startswith("image/"):
             return True
@@ -150,13 +134,12 @@ class BambooCog(commands.Cog):
             ".webp",
         }
 
-    def normalize_post_fields(self, title: str, content: str) -> tuple[str, str]:
-        normalized_title = title.strip()
+    def normalize_post_content(self, content: str) -> str:
         normalized_content = content.strip()
-        if not normalized_title or not normalized_content:
-            raise ValueError("제목과 내용은 공백만으로 작성할 수 없습니다.")
+        if not normalized_content:
+            raise ValueError("내용은 공백만으로 작성할 수 없습니다.")
 
-        return normalized_title, normalized_content
+        return normalized_content
 
     def get_publish_target_error(
         self,
@@ -176,37 +159,43 @@ class BambooCog(commands.Cog):
 
         if isinstance(channel, discord.TextChannel):
             if not self.bot_can_send_to_text(channel):
-                return (
-                    None,
-                    f"{channel.mention} 채널에 메시지를 보낼 권한이 없습니다.",
-                )
+                return None, f"{channel.mention} 채널에 메시지를 보낼 권한이 없습니다."
         else:
             if not self.bot_can_send_to_forum(channel):
-                return (
-                    None,
-                    f"{channel.mention} 포럼 채널에 글을 올릴 권한이 없습니다.",
-                )
+                return None, f"{channel.mention} 포럼 채널에 글을 올릴 권한이 없습니다."
 
             tag_error = self.get_forum_tag_error(channel)
             if tag_error is not None:
                 return None, tag_error
 
         if image is not None and not self.is_supported_image_attachment(image):
-            return (
-                None,
-                "사진은 PNG, JPG, JPEG, GIF, WEBP 형식의 이미지 파일만 첨부할 수 있습니다.",
-            )
+            return None, "사진은 PNG, JPG, JPEG, GIF, WEBP 형식만 첨부할 수 있습니다."
 
         if image is not None and not self.bot_can_attach_files(channel):
             return None, f"{channel.mention} 채널에 파일을 첨부할 권한이 없습니다."
 
         return channel, None
 
+    async def get_or_create_webhook(
+        self,
+        channel: BambooChannel,
+    ) -> discord.Webhook | None:
+        if self.bot.user is None:
+            return None
+
+        try:
+            for webhook in await channel.webhooks():
+                if webhook.user and webhook.user.id == self.bot.user.id:
+                    return webhook
+
+            return await channel.create_webhook(name=BAMBOO_DISPLAY_NAME)
+        except (discord.Forbidden, discord.HTTPException):
+            return None
+
     async def publish_from_modal(
         self,
         interaction: discord.Interaction,
         *,
-        title: str,
         content: str,
         image: discord.Attachment | None,
     ) -> None:
@@ -219,10 +208,7 @@ class BambooCog(commands.Cog):
             return
 
         try:
-            normalized_title, normalized_content = self.normalize_post_fields(
-                title,
-                content,
-            )
+            normalized_content = self.normalize_post_content(content)
         except ValueError as error:
             await interaction.response.send_message(str(error), ephemeral=True)
             return
@@ -230,9 +216,8 @@ class BambooCog(commands.Cog):
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         try:
-            jump_url = await self.publish_to_channel(
+            jump_url, notice = await self.publish_to_channel(
                 channel,
-                title=normalized_title,
                 content=normalized_content,
                 image=image,
             )
@@ -248,43 +233,82 @@ class BambooCog(commands.Cog):
                 ephemeral=True,
             )
             return
+        except RuntimeError as error:
+            await interaction.followup.send(
+                f"대나무숲 글 작성 중 오류가 발생했습니다: {error}",
+                ephemeral=True,
+            )
+            return
 
-        await interaction.followup.send(
-            f"익명 글을 {channel.mention}에 올렸습니다.\n{jump_url}",
-            ephemeral=True,
-        )
+        response_message = f"익명 글을 {channel.mention}에 올렸습니다.\n{jump_url}"
+        if notice is not None:
+            response_message += f"\n{notice}"
+
+        await interaction.followup.send(response_message, ephemeral=True)
 
     async def publish_to_channel(
         self,
         channel: BambooChannel,
         *,
-        title: str,
         content: str,
         image: discord.Attachment | None,
-    ) -> str:
-        embed = self.build_bamboo_embed(title, content)
+    ) -> tuple[str, str | None]:
         file: discord.File | None = None
         if image is not None:
             file = await image.to_file()
-            embed.set_image(url=f"attachment://{file.filename}")
 
         allowed_mentions = discord.AllowedMentions.none()
+        webhook = await self.get_or_create_webhook(channel)
+
+        if webhook is not None:
+            send_kwargs: dict[str, object] = {
+                "content": content,
+                "username": BAMBOO_DISPLAY_NAME,
+                "allowed_mentions": allowed_mentions,
+                "wait": True,
+                "suppress_embeds": True,
+            }
+            if file is not None:
+                send_kwargs["file"] = file
+
+            if isinstance(channel, discord.ForumChannel):
+                if channel.flags.require_tag and len(channel.available_tags) == 1:
+                    send_kwargs["applied_tags"] = [channel.available_tags[0]]
+
+                message = await webhook.send(
+                    thread_name=BAMBOO_FORUM_THREAD_NAME,
+                    **send_kwargs,
+                )
+            else:
+                message = await webhook.send(**send_kwargs)
+
+            if message is None:
+                raise RuntimeError("웹훅 전송 결과를 확인할 수 없습니다.")
+
+            return message.jump_url, None
+
+        fallback_notice = (
+            "이 채널에서는 웹훅 권한이 없어 또봇 이름으로 게시되었습니다. "
+            "대나무숲 이름으로 보내려면 봇에 웹훅 관리 권한을 주세요."
+        )
 
         if isinstance(channel, discord.TextChannel):
-            send_kwargs: dict[str, object] = {
-                "embed": embed,
+            send_kwargs = {
+                "content": content,
                 "allowed_mentions": allowed_mentions,
+                "suppress_embeds": True,
             }
             if file is not None:
                 send_kwargs["file"] = file
 
             message = await channel.send(**send_kwargs)
-            return message.jump_url
+            return message.jump_url, fallback_notice
 
         create_kwargs: dict[str, object] = {
-            "name": title,
-            "embed": embed,
+            "name": BAMBOO_FORUM_THREAD_NAME,
+            "content": content,
             "allowed_mentions": allowed_mentions,
+            "suppress_embeds": True,
         }
         if file is not None:
             create_kwargs["file"] = file
@@ -292,7 +316,7 @@ class BambooCog(commands.Cog):
             create_kwargs["applied_tags"] = [channel.available_tags[0]]
 
         created = await channel.create_thread(**create_kwargs)
-        return created.message.jump_url
+        return created.message.jump_url, fallback_notice
 
     @app_commands.command(name="bamboo", description="익명 대나무숲 글 작성")
     @app_commands.rename(image="사진")
@@ -356,8 +380,7 @@ class BambooCog(commands.Cog):
 
         if isinstance(channel, discord.ForumChannel):
             message = f"대나무숲 채널을 {channel.mention} 포럼으로 설정했습니다."
-            if channel.flags.require_tag and len(channel.available_tags) == 1:
-                message += f" 새 글에는 `{channel.available_tags[0].name}` 태그가 자동으로 붙습니다."
+            message += " 포럼은 디스코드 구조상 고정된 게시글 이름 `대나무숲`으로 올라갑니다."
         else:
             message = f"대나무숲 채널을 {channel.mention} 채팅 채널로 설정했습니다."
 

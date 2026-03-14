@@ -122,11 +122,11 @@ class GeminiService:
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 100,
-                    "description": "clear 실행 시 삭제할 메시지 개수. 없으면 0",
+                    "description": "clear 실행 시 삭제할 메시지 개수, 없으면 0",
                 },
                 "message": {
                     "type": "string",
-                    "description": "사용자에게 보여줄 한국어 안내 문구",
+                    "description": "사용자에게 보여줄 짧은 안내 문구",
                 },
             },
             "required": ["status", "action", "amount", "message"],
@@ -174,19 +174,69 @@ class GeminiService:
             async with session.post(url, headers=headers, json=payload) as response:
                 if response.status >= 400:
                     error_text = await response.text()
-                    raise GeminiError(
-                        f"Gemini API 요청 실패 ({response.status}): {error_text}"
+                    raise self._build_request_error(
+                        status=response.status,
+                        error_text=error_text,
                     )
                 data = await response.json()
 
         return self._extract_text(data)
+
+    def _build_request_error(
+        self,
+        *,
+        status: int,
+        error_text: str,
+    ) -> GeminiError:
+        parsed_message = self._extract_error_message(error_text)
+        normalized_message = parsed_message.lower()
+
+        if "reported as leaked" in normalized_message:
+            return GeminiConfigurationError(
+                "GEMINI_API_KEY가 유출로 차단되었습니다. "
+                "Google AI Studio에서 새 API 키를 발급하고 "
+                "Render 환경변수 `GEMINI_API_KEY` 값을 교체한 뒤 다시 배포해 주세요."
+            )
+
+        if status == 401:
+            return GeminiConfigurationError(
+                "GEMINI_API_KEY가 유효하지 않습니다. "
+                "Google AI Studio에서 API 키를 다시 발급하거나 "
+                "Render 환경변수 값을 확인해 주세요."
+            )
+
+        if status == 403:
+            return GeminiConfigurationError(
+                f"Gemini API 접근이 거부되었습니다. {parsed_message}"
+            )
+
+        return GeminiError(f"Gemini API 요청 실패 ({status}): {parsed_message}")
+
+    def _extract_error_message(self, error_text: str) -> str:
+        try:
+            parsed = json.loads(error_text)
+        except json.JSONDecodeError:
+            return error_text
+
+        if not isinstance(parsed, dict):
+            return error_text
+
+        error_object = parsed.get("error")
+        if not isinstance(error_object, dict):
+            return error_text
+
+        message = error_object.get("message")
+        if isinstance(message, str) and message.strip():
+            return message.strip()
+
+        return error_text
 
     def _extract_text(self, data: dict[str, object]) -> str:
         candidates = data.get("candidates")
         if not isinstance(candidates, list) or not candidates:
             prompt_feedback = data.get("promptFeedback")
             if prompt_feedback:
-                raise GeminiError(f"Gemini 응답이 차단되었습니다: {prompt_feedback}")
+                raise GeminiError(f"Gemini 응답이 차단되었습니다. {prompt_feedback}")
             raise GeminiError("Gemini 응답 후보가 없습니다.")
 
         candidate = candidates[0]
