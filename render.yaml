@@ -1,9 +1,10 @@
 services:
-  - type: worker
+  - type: web
     name: ttobot
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py
+    healthCheckPath: /healthz
     autoDeploy: false
     envVars:
       - key: DISCORD_BOT_TOKEN

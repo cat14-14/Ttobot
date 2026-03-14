@@ -1,7 +1,10 @@
 import os
 import socket
 import time
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 
 import aiohttp
 import discord
@@ -36,6 +39,7 @@ SYNC_GUILD_ID = os.getenv("DISCORD_GUILD_ID")
 SYNC_COMMANDS_ON_STARTUP = get_bool_env("SYNC_COMMANDS_ON_STARTUP")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL")
+RENDER_PORT = os.getenv("PORT")
 BASE_DIR = Path(__file__).resolve().parent
 
 
@@ -49,11 +53,46 @@ def create_bot() -> CoraxBot:
     )
 
 
+class HealthcheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:  # noqa: N802
+        if self.path not in {"/", "/healthz"}:
+            self.send_response(HTTPStatus.NOT_FOUND)
+            self.end_headers()
+            return
+
+        body = b"ok"
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
+
+
+class ReusableThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+
+
+def start_healthcheck_server() -> ReusableThreadingHTTPServer | None:
+    if not RENDER_PORT:
+        return None
+
+    server = ReusableThreadingHTTPServer(("0.0.0.0", int(RENDER_PORT)), HealthcheckHandler)
+    thread = Thread(target=server.serve_forever, name="render-healthcheck", daemon=True)
+    thread.start()
+    print(f"Render health server listening on 0.0.0.0:{RENDER_PORT}")
+    return server
+
+
 lock = InstanceLock(BASE_DIR / ".corax.lock")
 try:
     lock.acquire()
 except InstanceLockError as error:
     raise SystemExit(str(error)) from error
+
+healthcheck_server = start_healthcheck_server()
 
 try:
     while True:
@@ -76,4 +115,7 @@ try:
             print("인터넷 또는 DNS 문제입니다. 5초 뒤에 다시 연결합니다.")
             time.sleep(5)
 finally:
+    if healthcheck_server is not None:
+        healthcheck_server.shutdown()
+        healthcheck_server.server_close()
     lock.release()
