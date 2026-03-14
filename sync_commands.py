@@ -74,7 +74,7 @@ async def main() -> None:
     load_dotenv(base_dir / ".env")
 
     token = validate_discord_token(
-        os.getenv("DISCORD_TOKEN") or os.getenv("DISCORD_BOT_TOKEN")
+        os.getenv("DISCORD_BOT_TOKEN") or os.getenv("DISCORD_TOKEN")
     )
     gemini_api_key = os.getenv("GEMINI_API_KEY")
     gemini_model = os.getenv("GEMINI_MODEL")

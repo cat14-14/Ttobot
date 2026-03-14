@@ -25,7 +25,7 @@ def get_bool_env(name: str, default: bool = False) -> bool:
 def load_token() -> str:
     try:
         return validate_discord_token(
-            os.getenv("DISCORD_TOKEN") or os.getenv("DISCORD_BOT_TOKEN")
+            os.getenv("DISCORD_BOT_TOKEN") or os.getenv("DISCORD_TOKEN")
         )
     except ValueError as error:
         raise SystemExit(f"Discord 토큰 설정 오류: {error}") from error
